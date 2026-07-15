@@ -26,9 +26,13 @@
     "ci"
   ],
   "license": "MIT",
+  "author": "Glenn Dinkins",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/fj8b85t9g6-blip/codecordon.git"
+  },
+  "bugs": {
+    "url": "https://github.com/fj8b85t9g6-blip/codecordon/issues"
   },
   "homepage": "https://codecordon.up.railway.app",
   "dependencies": {
