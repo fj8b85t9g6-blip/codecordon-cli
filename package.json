@@ -4,7 +4,7 @@
   "description": "Scan AI-generated applications for known security mistakes from your terminal or CI pipeline.",
   "type": "module",
   "bin": {
-    "codecordon": "./bin/codecordon.js"
+    "codecordon": "bin/codecordon.js"
   },
   "files": [
     "bin",
