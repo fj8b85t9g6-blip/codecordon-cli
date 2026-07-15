@@ -14,14 +14,14 @@ macOS or Linux:
 
 ```bash
 export CODECORDON_API_KEY="cc_live_your_key_here"
-npx --yes codecordon@0.1.1 .
+npx --yes codecordon@0.1.0 .
 ```
 
 PowerShell:
 
 ```powershell
 $env:CODECORDON_API_KEY="cc_live_your_key_here"
-npx --yes codecordon@0.1.1 .
+npx --yes codecordon@0.1.0 .
 ```
 
 `npx` downloads and runs the published package; a global install is not required. Prefer the environment variable over `--api-key` so the key is less likely to enter shell history.
@@ -29,7 +29,7 @@ npx --yes codecordon@0.1.1 .
 Scan a public GitHub repository without cloning it:
 
 ```bash
-npx --yes codecordon@0.1.1 https://github.com/owner/repo --fail-on high
+npx --yes codecordon@0.1.0 https://github.com/owner/repo --fail-on high
 ```
 
 The default gate fails when a critical finding is present. Use `--fail-on high`,
