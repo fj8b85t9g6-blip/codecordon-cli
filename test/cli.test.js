@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import AdmZip from "adm-zip";
-import { buildArchive, formatReport, gateReport, parseArgs } from "../src/cli.js";
+import { buildArchive, formatReport, gateReport, main, parseArgs } from "../src/cli.js";
 
 describe("arguments", () => {
   it("uses environment defaults and validates gates", () => {
@@ -55,5 +55,40 @@ describe("gate", () => {
     assert.match(output, /Grade C/);
     assert.match(output, /AUTH001 api\.ts:4/);
     assert.match(output, /not a security certification/);
+  });
+});
+
+describe("acquisition attribution", () => {
+  it("marks successful GitHub Actions scans without exposing the key", async () => {
+    const previous = process.env.GITHUB_ACTIONS;
+    process.env.GITHUB_ACTIONS = "true";
+    let capturedHeaders;
+    const response = {
+      ok: true,
+      status: 201,
+      json: async () => ({
+        project: "demo",
+        grade: "A",
+        score: 100,
+        filesScanned: 1,
+        summary: { critical: 0, high: 0, medium: 0, low: 0 },
+        findings: [],
+      }),
+    };
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      const exitCode = await main(
+        ["https://github.com/owner/repo", "--api-key", "test-key"],
+        { fetch: async (_url, init) => { capturedHeaders = init.headers; return response; } }
+      );
+      assert.equal(exitCode, 0);
+      assert.equal(capturedHeaders["X-CodeCordon-Channel"], "github_action");
+      assert.match(capturedHeaders["X-CodeCordon-Client"], /^cli\//);
+    } finally {
+      console.log = originalLog;
+      if (previous === undefined) delete process.env.GITHUB_ACTIONS;
+      else process.env.GITHUB_ACTIONS = previous;
+    }
   });
 });

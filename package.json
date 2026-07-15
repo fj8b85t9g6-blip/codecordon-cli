@@ -1,6 +1,6 @@
 {
   "name": "codecordon",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Scan AI-generated applications for known security mistakes from your terminal or CI pipeline.",
   "type": "module",
   "bin": {

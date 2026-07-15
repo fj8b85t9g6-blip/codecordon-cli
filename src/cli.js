@@ -3,6 +3,7 @@ import path from "node:path";
 import AdmZip from "adm-zip";
 
 const DEFAULT_URL = "https://codecordon.up.railway.app";
+const CLI_VERSION = "0.1.1";
 const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
 const MAX_FILES = 5000;
 const SEVERITY_ORDER = ["critical", "high", "medium", "low"];
@@ -116,7 +117,7 @@ export async function main(argv, dependencies = {}) {
     return 0;
   }
   if (options.version) {
-    console.log("0.1.0");
+    console.log(CLI_VERSION);
     return 0;
   }
   if (!options.apiKey) {
@@ -146,7 +147,13 @@ export async function main(argv, dependencies = {}) {
   try {
     response = await fetchImpl(`${options.baseUrl.replace(/\/$/, "")}/api/v1/scans`, {
       method: "POST",
-      headers: { "X-Api-Key": options.apiKey },
+      headers: {
+        "X-Api-Key": options.apiKey,
+        "X-CodeCordon-Client": `cli/${CLI_VERSION}`,
+        "X-CodeCordon-Channel": process.env.CODECORDON_CHANNEL === "github_action" || process.env.GITHUB_ACTIONS === "true"
+          ? "github_action"
+          : "cli",
+      },
       body: form,
       signal: AbortSignal.timeout(120_000),
     });
