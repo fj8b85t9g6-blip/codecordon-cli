@@ -4,16 +4,77 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import AdmZip from "adm-zip";
-import { buildArchive, formatReport, gateReport, main, parseArgs } from "../src/cli.js";
+import {
+  buildArchive,
+  formatReport,
+  gateReport,
+  loadApiKey,
+  main,
+  normalizeTargetInput,
+  parseArgs,
+  saveApiKey,
+} from "../src/cli.js";
 
 describe("arguments", () => {
   it("uses environment defaults and validates gates", () => {
-    const parsed = parseArgs([".", "--fail-on", "high", "--min-score", "80", "--json"]);
+    const parsed = parseArgs(["scan", ".", "--fail-on", "high", "--min-score", "80", "--json"]);
+    assert.equal(parsed.command, "scan");
     assert.equal(parsed.target, ".");
+    assert.equal(parsed.targetProvided, true);
     assert.equal(parsed.failOn, "high");
     assert.equal(parsed.minScore, 80);
     assert.equal(parsed.format, "json");
     assert.throws(() => parseArgs(["--fail-on", "urgent"]), /must be/);
+  });
+
+  it("keeps the old path-first syntax and accepts drag-and-drop paths", () => {
+    assert.equal(parseArgs(["."]).command, "scan");
+    assert.equal(normalizeTargetInput("'/tmp/My Project'"), "/tmp/My Project");
+    assert.equal(normalizeTargetInput("/tmp/My\\ Project"), "/tmp/My Project");
+  });
+});
+
+describe("first-time setup", () => {
+  it("stores the API key in a private config for later scans", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "codecordon-config-"));
+    const configPath = path.join(root, "config.json");
+    saveApiKey("cc_testkey123", configPath);
+    assert.equal(loadApiKey(configPath), "cc_testkey123");
+  });
+
+  it("finishes setup and scans from one command", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "codecordon-first-scan-"));
+    const configPath = path.join(root, "config.json");
+    writeFileSync(path.join(root, "package.json"), "{}");
+    writeFileSync(path.join(root, "app.js"), "export const ok = true;");
+    const response = {
+      ok: true,
+      status: 201,
+      json: async () => ({
+        project: "first-scan",
+        grade: "A",
+        score: 100,
+        filesScanned: 2,
+        summary: { critical: 0, high: 0, medium: 0, low: 0 },
+        findings: [],
+      }),
+    };
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      const exitCode = await main(["scan", root], {
+        env: {},
+        interactive: true,
+        configPath,
+        openUrl: async () => {},
+        promptApiKey: async () => "cc_firstscan123",
+        fetch: async () => response,
+      });
+      assert.equal(exitCode, 0);
+      assert.equal(loadApiKey(configPath), "cc_firstscan123");
+    } finally {
+      console.log = originalLog;
+    }
   });
 });
 

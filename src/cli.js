@@ -1,9 +1,20 @@
-import { lstatSync, readFileSync, readdirSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { spawn } from "node:child_process";
+import { homedir } from "node:os";
+import { createInterface } from "node:readline/promises";
 import path from "node:path";
 import AdmZip from "adm-zip";
 
 const DEFAULT_URL = "https://codecordon.up.railway.app";
-const CLI_VERSION = "0.1.1";
+const CLI_VERSION = "0.2.0";
 const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
 const MAX_FILES = 5000;
 const SEVERITY_ORDER = ["critical", "high", "medium", "low"];
@@ -20,11 +31,21 @@ const IGNORED_DIRS = new Set([
   "build", "coverage", "dist", "node_modules", "out", "target", "vendor", "venv",
 ]);
 
-export function parseArgs(argv) {
+const COMMANDS = new Set(["scan", "login", "logout"]);
+const PROJECT_MARKERS = new Set([
+  ".git", "package.json", "pyproject.toml", "requirements.txt", "Cargo.toml",
+  "go.mod", "Package.swift", "Gemfile", "composer.json", "pom.xml", "build.gradle",
+]);
+
+export function parseArgs(argv, env = process.env) {
+  const args = [...argv];
+  const command = COMMANDS.has(args[0]) ? args.shift() : "scan";
   const options = {
+    command,
     target: ".",
-    apiKey: process.env.CODECORDON_API_KEY ?? "",
-    baseUrl: process.env.CODECORDON_URL ?? DEFAULT_URL,
+    targetProvided: false,
+    apiKey: env.CODECORDON_API_KEY ?? "",
+    baseUrl: env.CODECORDON_URL ?? DEFAULT_URL,
     name: "",
     format: "pretty",
     failOn: "critical",
@@ -34,23 +55,27 @@ export function parseArgs(argv) {
   };
   const positionals = [];
 
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
     if (arg === "--help" || arg === "-h") options.help = true;
     else if (arg === "--version" || arg === "-v") options.version = true;
     else if (arg === "--json") options.format = "json";
-    else if (arg === "--api-key") options.apiKey = requiredValue(argv, ++i, arg);
-    else if (arg === "--url") options.baseUrl = requiredValue(argv, ++i, arg);
-    else if (arg === "--name") options.name = requiredValue(argv, ++i, arg);
-    else if (arg === "--format") options.format = requiredValue(argv, ++i, arg);
-    else if (arg === "--fail-on") options.failOn = requiredValue(argv, ++i, arg);
-    else if (arg === "--min-score") options.minScore = Number(requiredValue(argv, ++i, arg));
+    else if (arg === "--api-key") options.apiKey = requiredValue(args, ++i, arg);
+    else if (arg === "--url") options.baseUrl = requiredValue(args, ++i, arg);
+    else if (arg === "--name") options.name = requiredValue(args, ++i, arg);
+    else if (arg === "--format") options.format = requiredValue(args, ++i, arg);
+    else if (arg === "--fail-on") options.failOn = requiredValue(args, ++i, arg);
+    else if (arg === "--min-score") options.minScore = Number(requiredValue(args, ++i, arg));
     else if (arg.startsWith("-")) throw new Error(`Unknown option: ${arg}`);
     else positionals.push(arg);
   }
 
+  if (command !== "scan" && positionals.length > 0) throw new Error(`${command} does not accept a scan target.`);
   if (positionals.length > 1) throw new Error("Provide one local path or public GitHub URL.");
-  if (positionals[0]) options.target = positionals[0];
+  if (positionals[0]) {
+    options.target = normalizeTargetInput(positionals[0]);
+    options.targetProvided = true;
+  }
   if (!new Set(["pretty", "json"]).has(options.format)) throw new Error("--format must be pretty or json.");
   if (![...SEVERITY_ORDER, "none"].includes(options.failOn)) {
     throw new Error("--fail-on must be critical, high, medium, low, or none.");
@@ -103,9 +128,10 @@ export function formatReport(report, gate) {
 }
 
 export async function main(argv, dependencies = {}) {
+  const env = dependencies.env ?? process.env;
   let options;
   try {
-    options = parseArgs(argv);
+    options = parseArgs(argv, env);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     console.error("Run codecordon --help for usage.");
@@ -120,8 +146,36 @@ export async function main(argv, dependencies = {}) {
     console.log(CLI_VERSION);
     return 0;
   }
+
+  const configPath = dependencies.configPath ?? getConfigPath(env);
+  const interactive = dependencies.interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY && !env.CI);
+
+  if (options.command === "logout") {
+    removeStoredApiKey(configPath);
+    console.log("CodeCordon login removed from this computer.");
+    return 0;
+  }
+
+  if (options.command === "login") {
+    const apiKey = options.apiKey || await runFirstTimeLogin(options, { ...dependencies, configPath, interactive });
+    if (!apiKey) return 2;
+    if (options.apiKey) saveApiKey(apiKey, configPath);
+    console.log("CodeCordon is ready. Run: npx --yes codecordon@latest scan");
+    return 0;
+  }
+
+  if (!options.targetProvided && interactive && !looksLikeProject(process.cwd())) {
+    const promptTarget = dependencies.promptTarget ?? promptForTarget;
+    const answer = normalizeTargetInput(await promptTarget());
+    if (answer) options.target = answer;
+  }
+
+  if (!options.apiKey) options.apiKey = loadApiKey(configPath);
+  if (!options.apiKey && interactive) {
+    options.apiKey = await runFirstTimeLogin(options, { ...dependencies, configPath, interactive });
+  }
   if (!options.apiKey) {
-    console.error("Set CODECORDON_API_KEY or pass --api-key. Create an API key in CodeCordon Settings.");
+    console.error("CodeCordon needs a Pro API key. Run `npx --yes codecordon@latest login` once, or set CODECORDON_API_KEY in CI.");
     return 2;
   }
 
@@ -165,6 +219,9 @@ export async function main(argv, dependencies = {}) {
   const payload = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
   if (!response.ok) {
     console.error(`CodeCordon API error (${response.status}): ${payload.error ?? "request failed"}`);
+    if (response.status === 401) {
+      console.error("Run `npx --yes codecordon@latest login` to replace the saved key.");
+    }
     return 2;
   }
   const gate = gateReport(payload, options);
@@ -214,6 +271,136 @@ function requiredValue(argv, index, option) {
   return value;
 }
 
+export function getConfigPath(env = process.env, home = homedir()) {
+  const configRoot = env.CODECORDON_CONFIG_DIR || env.XDG_CONFIG_HOME || path.join(home, ".config");
+  return path.join(configRoot, "codecordon", "config.json");
+}
+
+export function loadApiKey(configPath) {
+  try {
+    const config = JSON.parse(readFileSync(configPath, "utf8"));
+    return typeof config.apiKey === "string" ? config.apiKey : "";
+  } catch {
+    return "";
+  }
+}
+
+export function saveApiKey(apiKey, configPath) {
+  if (!/^(?:cc|vg)_[a-zA-Z0-9]+$/.test(apiKey)) {
+    throw new Error("That does not look like a CodeCordon API key.");
+  }
+  mkdirSync(path.dirname(configPath), { recursive: true, mode: 0o700 });
+  writeFileSync(configPath, `${JSON.stringify({ apiKey }, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(configPath, 0o600);
+}
+
+export function removeStoredApiKey(configPath) {
+  rmSync(configPath, { force: true });
+}
+
+export function normalizeTargetInput(value) {
+  let result = String(value ?? "").trim();
+  if ((result.startsWith('"') && result.endsWith('"')) || (result.startsWith("'") && result.endsWith("'"))) {
+    result = result.slice(1, -1);
+  }
+  result = result.replace(/\\ /g, " ");
+  if (result === "~") return homedir();
+  if (result.startsWith("~/")) return path.join(homedir(), result.slice(2));
+  return result;
+}
+
+export function looksLikeProject(target) {
+  try {
+    if (!lstatSync(target).isDirectory()) return false;
+    return readdirSync(target, { withFileTypes: true }).some((entry) =>
+      PROJECT_MARKERS.has(entry.name) || entry.name.endsWith(".xcodeproj") || entry.name.endsWith(".xcworkspace")
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function runFirstTimeLogin(options, dependencies) {
+  if (!dependencies.interactive) return "";
+  const settingsUrl = `${options.baseUrl.replace(/\/$/, "")}/settings`;
+  console.log("\nFirst-time CodeCordon setup");
+  console.log("1. Sign in, upgrade to Pro, and create an API key in Settings.");
+  console.log(`2. Copy the key, then return here.\n\n${settingsUrl}\n`);
+  const openUrl = dependencies.openUrl ?? openExternal;
+  await openUrl(settingsUrl).catch(() => {});
+  const promptApiKey = dependencies.promptApiKey ?? promptForApiKey;
+  const apiKey = String(await promptApiKey()).trim();
+  try {
+    saveApiKey(apiKey, dependencies.configPath);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    return "";
+  }
+  console.log("Login saved privately for future scans.");
+  return apiKey;
+}
+
+async function promptForTarget() {
+  const readline = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await readline.question("Drag your project folder here, then press Enter (or type its path): ");
+  } finally {
+    readline.close();
+  }
+}
+
+async function promptForApiKey() {
+  if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== "function") {
+    const readline = createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      return await readline.question("Paste your API key: ");
+    } finally {
+      readline.close();
+    }
+  }
+
+  return await new Promise((resolve, reject) => {
+    let value = "";
+    process.stdout.write("Paste your API key (hidden): ");
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    const cleanup = () => {
+      process.stdin.off("data", onData);
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+    };
+    const onData = (buffer) => {
+      for (const character of buffer.toString("utf8")) {
+        if (character === "\u0003") {
+          cleanup();
+          process.stdout.write("\n");
+          reject(new Error("Login cancelled."));
+          return;
+        }
+        if (character === "\r" || character === "\n") {
+          cleanup();
+          process.stdout.write("\n");
+          resolve(value);
+          return;
+        }
+        if (character === "\u007f" || character === "\b") {
+          value = value.slice(0, -1);
+          continue;
+        }
+        if (character >= " ") value += character;
+      }
+    };
+    process.stdin.on("data", onData);
+  });
+}
+
+async function openExternal(url) {
+  const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
+  const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+  const child = spawn(command, args, { detached: true, stdio: "ignore" });
+  child.unref();
+}
+
 function helpText() {
-  return `CodeCordon CLI\n\nUsage:\n  codecordon [path|github-url] [options]\n\nOptions:\n  --name <name>             Project name shown in CodeCordon\n  --api-key <key>           API key (prefer CODECORDON_API_KEY)\n  --url <url>               API base URL (default: ${DEFAULT_URL})\n  --fail-on <severity>      critical, high, medium, low, or none\n  --min-score <0-100>       Also fail below this score\n  --format <pretty|json>    Output format\n  --json                    Shortcut for --format json\n  -h, --help                Show help\n  -v, --version             Show version\n\nExamples:\n  CODECORDON_API_KEY=cc_live_... npx codecordon .\n  npx codecordon https://github.com/owner/repo --fail-on high\n  npx codecordon . --json --min-score 80`;
+  return `CodeCordon CLI\n\nUsage:\n  codecordon scan [path|github-url] [options]\n  codecordon login\n  codecordon logout\n\nRun \`codecordon scan\` anywhere. If the current folder is not a project, CodeCordon asks you to drag in the project folder. First use opens Settings and saves your API key in a private user-only config file.\n\nOptions:\n  --name <name>             Project name shown in CodeCordon\n  --api-key <key>           API key (prefer login locally or CODECORDON_API_KEY in CI)\n  --url <url>               API base URL (default: ${DEFAULT_URL})\n  --fail-on <severity>      critical, high, medium, low, or none\n  --min-score <0-100>       Also fail below this score\n  --format <pretty|json>    Output format\n  --json                    Shortcut for --format json\n  -h, --help                Show help\n  -v, --version             Show version\n\nExamples:\n  npx --yes codecordon@latest scan\n  npx --yes codecordon@latest scan /path/to/project\n  npx --yes codecordon@latest scan https://github.com/owner/repo --fail-on high\n  CODECORDON_API_KEY=cc_... codecordon scan . --json --min-score 80`;
 }

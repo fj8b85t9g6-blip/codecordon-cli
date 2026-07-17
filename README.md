@@ -4,32 +4,24 @@ Run CodeCordon's deterministic security scanner from a terminal or CI pipeline. 
 
 ## First scan
 
-1. Create an account at [codecordon.up.railway.app](https://codecordon.up.railway.app/register).
-2. Upgrade to Pro in **Settings**. API access is a Pro feature.
-3. In **Settings → API keys**, create a key and copy it immediately. CodeCordon never stores the readable key.
-4. Open a terminal in the project you want to scan.
-5. Put the key in an environment variable and run the CLI:
-
-macOS or Linux:
+Paste one command from any folder:
 
 ```bash
-export CODECORDON_API_KEY="cc_live_your_key_here"
-npx --yes codecordon@0.1.0 .
+npx --yes codecordon@latest scan
 ```
 
-PowerShell:
+On first use, CodeCordon:
 
-```powershell
-$env:CODECORDON_API_KEY="cc_live_your_key_here"
-npx --yes codecordon@0.1.0 .
-```
+1. Opens Settings so you can sign in, upgrade to Pro, and create an API key.
+2. Asks you to paste the key into a hidden prompt, then saves it in a user-only config file.
+3. Uses the current project folder. If you ran the command somewhere else, it asks you to drag the project folder into Terminal—no `cd` command or path construction required.
 
-`npx` downloads and runs the published package; a global install is not required. Prefer the environment variable over `--api-key` so the key is less likely to enter shell history.
+Future scans use the saved login. Run `npx --yes codecordon@latest logout` to remove it or `npx --yes codecordon@latest login` to replace it. In CI, continue to use the `CODECORDON_API_KEY` environment variable; interactive setup never runs there.
 
 Scan a public GitHub repository without cloning it:
 
 ```bash
-npx --yes codecordon@0.1.0 https://github.com/owner/repo --fail-on high
+npx --yes codecordon@latest scan https://github.com/owner/repo --fail-on high
 ```
 
 The default gate fails when a critical finding is present. Use `--fail-on high`,
@@ -46,6 +38,6 @@ means the configured known-pattern gate passed. It is not a security certificati
 - `1`: the scan ran, but a severity or score threshold failed.
 - `2`: the scan could not run. Read the error directly above it.
 
-If you see `invalid or missing X-Api-Key`, recreate or recopy the key in Settings. If you see `The CI API requires a Pro plan`, confirm the same account is on Pro. The CLI skips dependencies, build output, lockfiles, binaries, symlinks, files over 512 KB, and archives over 50 MB.
+If you see `invalid or missing X-Api-Key`, run `npx --yes codecordon@latest login` and paste a new key. If you see `The CI API requires a Pro plan`, confirm the same account is on Pro. The CLI skips dependencies, build output, lockfiles, binaries, symlinks, files over 512 KB, and archives over 50 MB.
 
 For pull-request setup, use the [reusable GitHub Actions workflow](https://github.com/fj8b85t9g6-blip/codecordon/blob/main/docs/github-actions.md).
