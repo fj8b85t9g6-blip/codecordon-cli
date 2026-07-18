@@ -44,4 +44,4 @@ means the configured known-pattern gate passed. It is not a security certificati
 
 If you see `invalid or missing X-Api-Key`, run `npx --yes codecordon@latest login` and paste a new key. If you see `The CI API requires a Pro plan`, confirm the same account is on Pro. The CLI skips dependencies, build output, lockfiles, binaries, symlinks, files over 512 KB, and archives over 50 MB.
 
-For pull-request setup, use the [reusable GitHub Actions workflow](https://github.com/fj8b85t9g6-blip/codecordon/blob/main/docs/github-actions.md).
+For pull-request setup, use the public [CodeCordon Security Gate Action](https://github.com/fj8b85t9g6-blip/codecordon-action).
