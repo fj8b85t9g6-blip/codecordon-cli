@@ -14,7 +14,7 @@ import path from "node:path";
 import AdmZip from "adm-zip";
 
 const DEFAULT_URL = "https://codecordon.up.railway.app";
-const CLI_VERSION = "0.3.0";
+const CLI_VERSION = "0.3.2";
 const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
 const MAX_FILES = 5000;
 const SEVERITY_ORDER = ["critical", "high", "medium", "low"];

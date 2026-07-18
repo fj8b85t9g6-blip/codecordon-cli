@@ -181,7 +181,7 @@ describe("free public GitHub preview", () => {
       assert.equal(prompted, 0);
       assert.match(request.url, /\/api\/v1\/public-scans$/);
       assert.equal(request.init.headers["X-Api-Key"], undefined);
-      assert.equal(request.init.headers["X-CodeCordon-Client"], "cli/0.3.0");
+      assert.equal(request.init.headers["X-CodeCordon-Client"], "cli/0.3.2");
       assert.equal(request.init.headers["X-CodeCordon-Channel"], "cli");
       assert.equal(request.init.body.get("github_url"), "https://github.com/owner/repo");
       assert.match(output.join("\n"), /preview\/token/);
