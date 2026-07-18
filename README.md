@@ -4,17 +4,17 @@ Run CodeCordon's deterministic security scanner from a terminal or CI pipeline. 
 
 ## First scan
 
-Paste one command from any folder:
-
-```bash
-npx --yes codecordon@latest scan https://github.com/owner/repo
-```
-
-Until npm `0.3.0` publication is complete, the same signed-off package can be
-run from its public GitHub release:
+Paste one command from any folder to scan a public GitHub repository without an account:
 
 ```bash
 npx --yes --package=https://github.com/fj8b85t9g6-blip/codecordon-cli/releases/download/v0.3.0/codecordon-0.3.0.tgz codecordon scan https://github.com/owner/repo
+```
+
+This installs the reviewed public `v0.3.0` release. After `v0.3.0` is published
+to npm, the shorter equivalent will be:
+
+```bash
+npx --yes codecordon@latest scan https://github.com/owner/repo
 ```
 
 For a public GitHub URL, CodeCordon runs without an account and returns a preview that expires after 24 hours. Free previews are limited to three per hour and are available only in an interactive terminal.
