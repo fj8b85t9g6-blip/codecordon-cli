@@ -10,6 +10,13 @@ Paste one command from any folder:
 npx --yes codecordon@latest scan
 ```
 
+Until npm `0.2.1` publication is complete, the same signed-off package can be
+run from its public GitHub release:
+
+```bash
+npx --yes --package=https://github.com/fj8b85t9g6-blip/codecordon-cli/releases/download/v0.2.1/codecordon-0.2.1.tgz codecordon scan
+```
+
 On first use, CodeCordon:
 
 1. Opens Settings so you can sign in, upgrade to Pro, and create an API key.
