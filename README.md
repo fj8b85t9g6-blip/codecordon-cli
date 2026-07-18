@@ -1,6 +1,6 @@
 # CodeCordon CLI
 
-Run CodeCordon's deterministic security scanner from a terminal or CI pipeline. You need Node.js 20 or newer. Interactive scans of public GitHub repositories include a free 24-hour preview; local projects, saved scans, and CI require CodeCordon Pro.
+Run CodeCordon's deterministic security scanner from a terminal or CI pipeline. You need Node.js 20 or newer. Interactive scans of public GitHub repositories include a free 24-hour preview; local-folder CLI scans and CI require CodeCordon Pro. Free accounts can still save scans created in the web app.
 
 ## First scan
 
