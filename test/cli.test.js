@@ -130,6 +130,141 @@ describe("gate", () => {
       /https:\/\/codecordon\.example\/scans\/42\?utm_source=codecordon_cli&utm_medium=product&utm_campaign=scan_to_shipbond/,
     );
   });
+
+  it("hands a free result to its 24-hour preview", () => {
+    const previewUrl = "https://codecordon.example/preview/token?utm_source=codecordon_cli";
+    const output = formatReport(
+      { ...report, previewUrl },
+      gateReport(report, { failOn: "high", minScore: null }),
+    );
+    assert.match(output, /inspect the 24-hour preview/);
+    assert.match(output, /create an account to save scans and build ShipBond evidence/);
+    assert.match(output, new RegExp(previewUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  });
+});
+
+describe("free public GitHub preview", () => {
+  it("scans interactively without login or an API key", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "codecordon-free-preview-"));
+    const configPath = path.join(root, "config.json");
+    const previewUrl = "https://codecordon.example/preview/token?utm_source=codecordon_cli";
+    let request;
+    let opened = 0;
+    let prompted = 0;
+    const output = [];
+    const response = {
+      ok: true,
+      status: 201,
+      json: async () => ({
+        project: "owner/repo",
+        previewUrl,
+        grade: "A",
+        score: 100,
+        filesScanned: 1,
+        summary: { critical: 0, high: 0, medium: 0, low: 0 },
+        findings: [],
+      }),
+    };
+    const originalLog = console.log;
+    console.log = (value) => output.push(value);
+    try {
+      const exitCode = await main(["scan", "https://github.com/owner/repo"], {
+        env: {},
+        interactive: true,
+        configPath,
+        openUrl: async () => { opened += 1; },
+        promptApiKey: async () => { prompted += 1; return ""; },
+        fetch: async (url, init) => { request = { url, init }; return response; },
+      });
+      assert.equal(exitCode, 0);
+      assert.equal(opened, 0);
+      assert.equal(prompted, 0);
+      assert.match(request.url, /\/api\/v1\/public-scans$/);
+      assert.equal(request.init.headers["X-Api-Key"], undefined);
+      assert.equal(request.init.headers["X-CodeCordon-Client"], "cli/0.3.0");
+      assert.equal(request.init.headers["X-CodeCordon-Channel"], "cli");
+      assert.equal(request.init.body.get("github_url"), "https://github.com/owner/repo");
+      assert.match(output.join("\n"), /preview\/token/);
+    } finally {
+      console.log = originalLog;
+    }
+  });
+
+  it("keeps keyless non-interactive scans blocked", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "codecordon-no-key-"));
+    const configPath = path.join(root, "config.json");
+    let fetched = false;
+    const errors = [];
+    const originalError = console.error;
+    console.error = (value) => errors.push(value);
+    try {
+      const exitCode = await main(["scan", "https://github.com/owner/repo"], {
+        env: { CI: "true" },
+        interactive: false,
+        configPath,
+        fetch: async () => { fetched = true; throw new Error("should not fetch"); },
+      });
+      assert.equal(exitCode, 2);
+      assert.equal(fetched, false);
+      assert.match(errors.join("\n"), /Pro API key for local and non-interactive scans/);
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  it("does not treat an injected interactive CI run as a free preview", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "codecordon-ci-no-key-"));
+    const errors = [];
+    const originalError = console.error;
+    console.error = (value) => errors.push(value);
+    try {
+      const exitCode = await main(["scan", "https://github.com/owner/repo"], {
+        env: { CI: "true", GITHUB_ACTIONS: "true" },
+        interactive: true,
+        configPath: path.join(root, "config.json"),
+        fetch: async () => { throw new Error("should not fetch"); },
+      });
+      assert.equal(exitCode, 2);
+      assert.match(errors.join("\n"), /Pro API key/);
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  it("uses the paid endpoint when a GitHub scan has a stored key", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "codecordon-stored-key-"));
+    const configPath = path.join(root, "config.json");
+    saveApiKey("cc_storedkey123", configPath);
+    let request;
+    const response = {
+      ok: true,
+      status: 201,
+      json: async () => ({
+        scanId: 11,
+        project: "owner/repo",
+        grade: "A",
+        score: 100,
+        filesScanned: 1,
+        summary: { critical: 0, high: 0, medium: 0, low: 0 },
+        findings: [],
+      }),
+    };
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      const exitCode = await main(["scan", "https://github.com/owner/repo"], {
+        env: {},
+        interactive: true,
+        configPath,
+        fetch: async (url, init) => { request = { url, init }; return response; },
+      });
+      assert.equal(exitCode, 0);
+      assert.match(request.url, /\/api\/v1\/scans$/);
+      assert.equal(request.init.headers["X-Api-Key"], "cc_storedkey123");
+    } finally {
+      console.log = originalLog;
+    }
+  });
 });
 
 describe("machine-readable output", () => {
@@ -169,8 +304,6 @@ describe("machine-readable output", () => {
 
 describe("acquisition attribution", () => {
   it("marks successful GitHub Actions scans without exposing the key", async () => {
-    const previous = process.env.GITHUB_ACTIONS;
-    process.env.GITHUB_ACTIONS = "true";
     let capturedHeaders;
     const response = {
       ok: true,
@@ -189,15 +322,13 @@ describe("acquisition attribution", () => {
     try {
       const exitCode = await main(
         ["https://github.com/owner/repo", "--api-key", "test-key"],
-        { fetch: async (_url, init) => { capturedHeaders = init.headers; return response; } }
+        { env: { GITHUB_ACTIONS: "true" }, fetch: async (_url, init) => { capturedHeaders = init.headers; return response; } }
       );
       assert.equal(exitCode, 0);
       assert.equal(capturedHeaders["X-CodeCordon-Channel"], "github_action");
       assert.match(capturedHeaders["X-CodeCordon-Client"], /^cli\//);
     } finally {
       console.log = originalLog;
-      if (previous === undefined) delete process.env.GITHUB_ACTIONS;
-      else process.env.GITHUB_ACTIONS = previous;
     }
   });
 });

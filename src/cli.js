@@ -14,7 +14,7 @@ import path from "node:path";
 import AdmZip from "adm-zip";
 
 const DEFAULT_URL = "https://codecordon.up.railway.app";
-const CLI_VERSION = "0.2.1";
+const CLI_VERSION = "0.3.0";
 const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
 const MAX_FILES = 5000;
 const SEVERITY_ORDER = ["critical", "high", "medium", "low"];
@@ -128,6 +128,9 @@ export function formatReport(report, gate, { baseUrl = DEFAULT_URL } = {}) {
     const scanUrl = `${baseUrl.replace(/\/$/, "")}/scans/${Number(report.scanId)}?utm_source=codecordon_cli&utm_medium=product&utm_campaign=scan_to_shipbond`;
     lines.push("Next: open the saved scan, verify the live deployment, and create ShipBond launch evidence:");
     lines.push(scanUrl);
+  } else if (typeof report.previewUrl === "string" && report.previewUrl.startsWith("http")) {
+    lines.push("Next: inspect the 24-hour preview, then create an account to save scans and build ShipBond evidence:");
+    lines.push(report.previewUrl);
   }
   return lines.join("\n");
 }
@@ -154,6 +157,9 @@ export async function main(argv, dependencies = {}) {
 
   const configPath = dependencies.configPath ?? getConfigPath(env);
   const interactive = dependencies.interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY && !env.CI);
+  const channel = env.CODECORDON_CHANNEL === "github_action" || env.GITHUB_ACTIONS === "true"
+    ? "github_action"
+    : "cli";
 
   if (options.command === "logout") {
     removeStoredApiKey(configPath);
@@ -175,16 +181,22 @@ export async function main(argv, dependencies = {}) {
     if (answer) options.target = answer;
   }
 
+  const githubUrl = parseGithubTarget(options.target);
   if (!options.apiKey) options.apiKey = loadApiKey(configPath);
-  if (!options.apiKey && interactive) {
+  const canRunInteractiveSetup = interactive && !env.CI && channel === "cli";
+  const freePublicPreview = !options.apiKey
+    && canRunInteractiveSetup
+    && Boolean(githubUrl);
+  if (!options.apiKey && canRunInteractiveSetup && !freePublicPreview) {
     options.apiKey = await runFirstTimeLogin(options, { ...dependencies, configPath, interactive });
   }
   if (!options.apiKey) {
-    console.error("CodeCordon needs a Pro API key. Run `npx --yes codecordon@latest login` once, or set CODECORDON_API_KEY in CI.");
-    return 2;
+    if (!freePublicPreview) {
+      console.error("CodeCordon needs a Pro API key for local and non-interactive scans. Run `npx --yes codecordon@latest login` once, or set CODECORDON_API_KEY in CI.");
+      return 2;
+    }
   }
 
-  const githubUrl = parseGithubTarget(options.target);
   const projectName = options.name || inferProjectName(options.target, githubUrl);
   const form = new FormData();
   form.set("name", projectName);
@@ -202,17 +214,17 @@ export async function main(argv, dependencies = {}) {
   }
 
   const fetchImpl = dependencies.fetch ?? fetch;
+  const endpoint = freePublicPreview ? "/api/v1/public-scans" : "/api/v1/scans";
+  const headers = {
+    "X-CodeCordon-Client": `cli/${CLI_VERSION}`,
+    "X-CodeCordon-Channel": channel,
+  };
+  if (!freePublicPreview) headers["X-Api-Key"] = options.apiKey;
   let response;
   try {
-    response = await fetchImpl(`${options.baseUrl.replace(/\/$/, "")}/api/v1/scans`, {
+    response = await fetchImpl(`${options.baseUrl.replace(/\/$/, "")}${endpoint}`, {
       method: "POST",
-      headers: {
-        "X-Api-Key": options.apiKey,
-        "X-CodeCordon-Client": `cli/${CLI_VERSION}`,
-        "X-CodeCordon-Channel": process.env.CODECORDON_CHANNEL === "github_action" || process.env.GITHUB_ACTIONS === "true"
-          ? "github_action"
-          : "cli",
-      },
+      headers,
       body: form,
       signal: AbortSignal.timeout(120_000),
     });
@@ -409,5 +421,5 @@ async function openExternal(url) {
 }
 
 function helpText() {
-  return `CodeCordon CLI\n\nUsage:\n  codecordon scan [path|github-url] [options]\n  codecordon login\n  codecordon logout\n\nRun \`codecordon scan\` anywhere. If the current folder is not a project, CodeCordon asks you to drag in the project folder. First use opens Settings and saves your API key in a private user-only config file.\n\nOptions:\n  --name <name>             Project name shown in CodeCordon\n  --api-key <key>           API key (prefer login locally or CODECORDON_API_KEY in CI)\n  --url <url>               API base URL (default: ${DEFAULT_URL})\n  --fail-on <severity>      critical, high, medium, low, or none\n  --min-score <0-100>       Also fail below this score\n  --format <pretty|json>    Output format\n  --json                    Shortcut for --format json\n  -h, --help                Show help\n  -v, --version             Show version\n\nExamples:\n  npx --yes codecordon@latest scan\n  npx --yes codecordon@latest scan /path/to/project\n  npx --yes codecordon@latest scan https://github.com/owner/repo --fail-on high\n  CODECORDON_API_KEY=cc_... codecordon scan . --json --min-score 80`;
+  return `CodeCordon CLI\n\nUsage:\n  codecordon scan [path|github-url] [options]\n  codecordon login\n  codecordon logout\n\nInteractive scans of public GitHub repositories include a free 24-hour preview without an account. Local projects, saved scans, and CI require Pro. If the current folder is not a project, CodeCordon asks you to drag in the project folder. First local use opens Settings and saves your API key in a private user-only config file.\n\nOptions:\n  --name <name>             Project name shown in CodeCordon\n  --api-key <key>           API key (prefer login locally or CODECORDON_API_KEY in CI)\n  --url <url>               API base URL (default: ${DEFAULT_URL})\n  --fail-on <severity>      critical, high, medium, low, or none\n  --min-score <0-100>       Also fail below this score\n  --format <pretty|json>    Output format\n  --json                    Shortcut for --format json\n  -h, --help                Show help\n  -v, --version             Show version\n\nExamples:\n  npx --yes codecordon@latest scan https://github.com/owner/repo\n  npx --yes codecordon@latest scan\n  npx --yes codecordon@latest scan /path/to/project\n  CODECORDON_API_KEY=cc_... codecordon scan . --json --min-score 80`;
 }
