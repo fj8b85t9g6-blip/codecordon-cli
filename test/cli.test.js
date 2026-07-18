@@ -117,6 +117,54 @@ describe("gate", () => {
     assert.match(output, /AUTH001 api\.ts:4/);
     assert.match(output, /not a security certification/);
   });
+
+  it("hands an interactive result to the saved scan and ShipBond workflow", () => {
+    const output = formatReport(
+      { ...report, scanId: 42 },
+      gateReport(report, { failOn: "high", minScore: null }),
+      { baseUrl: "https://codecordon.example/" },
+    );
+    assert.match(output, /create ShipBond launch evidence/);
+    assert.match(
+      output,
+      /https:\/\/codecordon\.example\/scans\/42\?utm_source=codecordon_cli&utm_medium=product&utm_campaign=scan_to_shipbond/,
+    );
+  });
+});
+
+describe("machine-readable output", () => {
+  it("does not add conversion copy to JSON output", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "codecordon-json-"));
+    writeFileSync(path.join(root, "package.json"), "{}");
+    const response = {
+      ok: true,
+      status: 201,
+      json: async () => ({
+        scanId: 42,
+        project: "json-scan",
+        grade: "A",
+        score: 100,
+        filesScanned: 1,
+        summary: { critical: 0, high: 0, medium: 0, low: 0 },
+        findings: [],
+      }),
+    };
+    const output = [];
+    const originalLog = console.log;
+    console.log = (value) => output.push(value);
+    try {
+      const exitCode = await main(["scan", root, "--api-key", "test-key", "--json"], {
+        fetch: async () => response,
+      });
+      assert.equal(exitCode, 0);
+      assert.equal(output.length, 1);
+      const parsed = JSON.parse(output[0]);
+      assert.equal(parsed.scanId, 42);
+      assert.doesNotMatch(output[0], /ShipBond|utm_campaign/);
+    } finally {
+      console.log = originalLog;
+    }
+  });
 });
 
 describe("acquisition attribution", () => {

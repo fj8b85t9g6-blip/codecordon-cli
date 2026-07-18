@@ -29,6 +29,10 @@ The default gate fails when a critical finding is present. Use `--fail-on high`,
 is compressed in memory; dependencies, build output, lockfiles, binaries, and
 files larger than 512KB are excluded.
 
+Readable scan output links to the saved web report so you can verify a live
+deployment and create ShipBond launch evidence. `--json` remains machine-readable
+and does not include that display-only handoff.
+
 An API key and CodeCordon Pro plan are required for CI scans. A passing command
 means the configured known-pattern gate passed. It is not a security certification.
 

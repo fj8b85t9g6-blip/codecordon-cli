@@ -14,7 +14,7 @@ import path from "node:path";
 import AdmZip from "adm-zip";
 
 const DEFAULT_URL = "https://codecordon.up.railway.app";
-const CLI_VERSION = "0.2.0";
+const CLI_VERSION = "0.2.1";
 const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
 const MAX_FILES = 5000;
 const SEVERITY_ORDER = ["critical", "high", "medium", "low"];
@@ -111,7 +111,7 @@ export function gateReport(report, { failOn, minScore }) {
   return { passed: reasons.length === 0, reasons };
 }
 
-export function formatReport(report, gate) {
+export function formatReport(report, gate, { baseUrl = DEFAULT_URL } = {}) {
   const counts = report.summary ?? {};
   const lines = [
     `CodeCordon: ${report.project ?? "project"}`,
@@ -124,6 +124,11 @@ export function formatReport(report, gate) {
   if ((report.findings?.length ?? 0) > 20) lines.push(`...and ${report.findings.length - 20} more findings`);
   lines.push(gate.passed ? "Gate: PASS" : `Gate: FAIL (${gate.reasons.join("; ")})`);
   lines.push("A passing scan means no configured known-pattern gate failed; it is not a security certification.");
+  if (Number.isSafeInteger(Number(report.scanId)) && Number(report.scanId) > 0) {
+    const scanUrl = `${baseUrl.replace(/\/$/, "")}/scans/${Number(report.scanId)}?utm_source=codecordon_cli&utm_medium=product&utm_campaign=scan_to_shipbond`;
+    lines.push("Next: open the saved scan, verify the live deployment, and create ShipBond launch evidence:");
+    lines.push(scanUrl);
+  }
   return lines.join("\n");
 }
 
@@ -225,7 +230,9 @@ export async function main(argv, dependencies = {}) {
     return 2;
   }
   const gate = gateReport(payload, options);
-  console.log(options.format === "json" ? JSON.stringify({ ...payload, gate }, null, 2) : formatReport(payload, gate));
+  console.log(options.format === "json"
+    ? JSON.stringify({ ...payload, gate }, null, 2)
+    : formatReport(payload, gate, { baseUrl: options.baseUrl }));
   return gate.passed ? 0 : 1;
 }
 
