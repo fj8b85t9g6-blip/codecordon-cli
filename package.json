@@ -1,6 +1,6 @@
 {
   "name": "codecordon",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Scan AI-generated applications for known security mistakes from your terminal or CI pipeline.",
   "type": "module",
   "bin": {
@@ -21,8 +21,13 @@
   "keywords": [
     "security",
     "static-analysis",
+    "sast",
+    "security-scanner",
+    "code-security",
     "vibe-coding",
     "ai-code",
+    "devsecops",
+    "github-actions",
     "ci"
   ],
   "license": "MIT",
